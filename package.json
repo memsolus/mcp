@@ -1,14 +1,15 @@
 {
   "name": "@memsolus/mcp",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Persistent memory for AI agents. Store, search, and reason over long-term context via Model Context Protocol (MCP).",
   "type": "module",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
     "memsolus-mcp": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
     "start:http": "node dist/http.js"
@@ -23,8 +24,18 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/memsolus/mcp.git"
+  },
+  "homepage": "https://memsolus.com",
+  "bugs": {
+    "url": "https://github.com/memsolus/mcp/issues"
+  },
+  "author": "Memsolus <contact@memsolus.com> (https://memsolus.com)",
   "keywords": [
     "mcp",
     "memory",

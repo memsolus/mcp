@@ -32,15 +32,20 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 
   tool(
     'add_memory',
-    'Store a new piece of information as a persistent memory — preferences, facts, decisions, or any context worth remembering across conversations. The memory enters an async processing pipeline and becomes searchable once processed (status changes from PENDING to READY). Write content as clear, standalone statements.',
+    `Store a new persistent memory. Use when the user shares a fact, preference, decision, or any context worth remembering across conversations.
+
+When to use: User states a preference ("I prefer dark mode"), shares a fact ("Our API runs on port 3000"), makes a decision ("We chose PostgreSQL"), or says "remember this".
+When NOT to use: Temporary info, greetings, acknowledgments, or things that only matter for the current conversation.
+
+The memory enters an async pipeline: extraction → embedding → consolidation → knowledge compilation. It becomes searchable within seconds (status: PENDING → READY).`,
     {
-      content: z.string().describe('A clear, self-contained statement of what to remember. Write as a complete sentence that makes sense without additional context, e.g. "The user prefers TypeScript over JavaScript for backend development."'),
-      user_id: z.string().optional().describe('Identifier for the end-user this memory belongs to. Use this to keep memories separate per person. Without it, the memory is global to the workspace.'),
-      agent_id: z.string().optional().describe('Identifier for the AI agent storing this memory. Useful for multi-agent setups where different agents manage different contexts.'),
-      session_id: z.string().optional().describe('Identifier for the current conversation session. Groups memories from the same interaction for better context clustering.'),
-      metadata: z.string().optional().describe('JSON string with additional structured data, e.g. \'{"source": "chat", "confidence": 0.9}\'. Stored alongside the memory for filtering.'),
-      priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional().describe('LOW = nice-to-know, may be pruned during consolidation. MEDIUM (default) = standard facts and preferences. HIGH = critical rules or strong preferences the user explicitly emphasized — ranked higher in search and resistant to pruning.'),
-      pool_id: z.string().optional().describe('UUID of a shared memory pool. When provided, the memory becomes visible to all pool members. Use add_memory_to_pool tool instead if you want clearer intent.'),
+      content: z.string().describe('A clear, self-contained statement. Write as a complete sentence, e.g. "Prefers TypeScript over JavaScript for backend" or "O projeto usa NestJS 11 com Fastify". Use the SAME LANGUAGE the user spoke in.'),
+      user_id: z.string().optional().describe('End-user ID to scope this memory. Without it, memory is global to the workspace.'),
+      agent_id: z.string().optional().describe('Agent ID storing this memory. For multi-agent setups.'),
+      session_id: z.string().optional().describe('Current session ID. Groups memories from the same conversation.'),
+      metadata: z.string().optional().describe('JSON string with structured data, e.g. \'{"source": "chat", "topic": "infrastructure"}\'.'),
+      priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional().describe('LOW = supplementary, may be summarized. MEDIUM (default) = standard facts. HIGH = critical rules the user explicitly emphasized ("always", "never", "must").'),
+      pool_id: z.string().optional().describe('UUID of a shared pool. Prefer add_memory_to_pool for clearer intent.'),
     },
     async (args) => {
       let metadata: Record<string, unknown> | undefined;
@@ -74,16 +79,24 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 
   tool(
     'search_memories',
-    'Find relevant memories using semantic similarity, keyword matching, or both. This is your primary retrieval tool — use it when you need context for a task, want to recall what you know about a topic, or need to find specific information. Choose the search mode based on your needs: "hybrid" (default) combines meaning + keywords for best overall quality, "semantic" finds conceptually related memories even with different wording, "keyword" matches exact terms like names and IDs.',
+    `Find relevant memories by meaning, keywords, or both. This is the primary retrieval tool.
+
+When to use: You need context about a topic, want to recall stored info, or the user asks "what do you know about X?".
+When NOT to use: You need the full user profile (use get_knowledge instead) or want to browse chronologically (use get_memories).
+
+Search modes:
+- hybrid (default): combines semantic + keyword — best for most queries
+- semantic: finds conceptually related memories even with different wording — use for "how does X work?"
+- keyword: exact term matching — use for names, IDs, file paths, specific technical terms`,
     {
-      query: z.string().describe('What you are looking for, in natural language. Be specific — "user preferences for code style" works better than just "preferences".'),
-      user_id: z.string().optional().describe('Scope search to a specific end-user. Omit to search across all users in the workspace.'),
-      agent_id: z.string().optional().describe('Scope search to memories from a specific agent.'),
-      limit: z.number().optional().describe('Maximum results to return (default 10, max 100). Start with 10, increase if you need more comprehensive results.'),
-      mode: z.enum(['hybrid', 'semantic', 'keyword']).optional().describe('hybrid (default): best general-purpose, combines semantic understanding with keyword matching. semantic: pure meaning-based, finds related concepts even with different words — use for conceptual questions. keyword: exact text matching, use for names, IDs, specific technical terms.'),
-      priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional().describe('Filter results to only this priority level. Useful when you specifically need HIGH-priority rules or preferences.'),
-      pool_id: z.string().optional().describe('Restrict search to memories within a specific shared pool.'),
-      include_pool_memories: z.boolean().optional().describe('When true, also includes memories from pools the user is a member of. Default false — set to true when you want the broadest possible context.'),
+      query: z.string().describe('Natural language query. Be specific: "user preferences for code style" > "preferences". Use the same language the memories were stored in.'),
+      user_id: z.string().optional().describe('Scope to one user. Omit to search all users in workspace.'),
+      agent_id: z.string().optional().describe('Scope to one agent.'),
+      limit: z.number().optional().describe('Max results (default 10, max 100). Start with 10.'),
+      mode: z.enum(['hybrid', 'semantic', 'keyword']).optional().describe('Search strategy. Default: hybrid.'),
+      priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional().describe('Filter to one priority level only.'),
+      pool_id: z.string().optional().describe('Restrict to a specific shared pool.'),
+      include_pool_memories: z.boolean().optional().describe('Also include memories from pools the user belongs to. Default false.'),
     },
     async (args) => {
       const params: Record<string, string | number | boolean | undefined> = {
@@ -118,11 +131,14 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 
   tool(
     'get_memories',
-    'Browse through all stored memories with pagination and optional filters. Unlike search_memories, this does NOT rank by relevance — it returns memories in chronological order. Use this for auditing, browsing, or when you need to see everything rather than find something specific.',
+    `List stored memories chronologically with pagination. Unlike search_memories, this does NOT rank by relevance.
+
+When to use: Browsing, auditing, or when you need to see everything — not find something specific.
+When NOT to use: Looking for specific info (use search_memories) or loading user profile (use get_knowledge).`,
     {
-      user_id: z.string().optional().describe('Filter to a specific end-user.'),
-      agent_id: z.string().optional().describe('Filter to a specific agent.'),
-      page: z.number().optional().describe('Page number, starting at 1.'),
+      user_id: z.string().optional().describe('Filter to one user.'),
+      agent_id: z.string().optional().describe('Filter to one agent.'),
+      page: z.number().optional().describe('Page number (starts at 1).'),
       page_size: z.number().optional().describe('Items per page (default 10, max 100).'),
     },
     async (args) => {
@@ -153,9 +169,9 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 
   tool(
     'get_memory',
-    'Retrieve a single memory by its exact ID. Use this when you already have a memory ID from a previous search result and need the full details including status and timestamps.',
+    'Retrieve a single memory by ID. Use when you have an ID from search results and need full details (status, timestamps, metadata).',
     {
-      memory_id: z.string().describe('The UUID of the memory to retrieve.'),
+      memory_id: z.string().describe('UUID of the memory.'),
     },
     async (args) => {
       const res = await client.get<ApiResponse<Record<string, unknown>>>(`/v1/memories/${args.memory_id}`);
@@ -177,11 +193,14 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 
   tool(
     'update_memory',
-    'Replace the content of an existing memory. Use this to correct inaccurate information or update outdated facts. The memory will be re-processed through the pipeline (new embedding, re-categorization, re-consolidation).',
+    `Replace the content of an existing memory. Triggers re-processing (new embedding, re-categorization, re-consolidation).
+
+When to use: User corrects a fact, a preference changed, or info is outdated. PREFER this over delete+add when fixing existing info.
+When NOT to use: The info is completely wrong and should just be removed (use delete_memory).`,
     {
-      memory_id: z.string().describe('The UUID of the memory to update.'),
-      content: z.string().describe('The new content that fully replaces the existing text. Write as a complete, self-contained statement.'),
-      priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional().describe('Optionally change the priority level.'),
+      memory_id: z.string().describe('UUID of the memory to update.'),
+      content: z.string().describe('New content that fully replaces the existing text. Write as a complete, self-contained statement.'),
+      priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional().describe('Optionally change priority.'),
     },
     async (args) => {
       const body: Record<string, unknown> = {
@@ -203,9 +222,12 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 
   tool(
     'delete_memory',
-    'Permanently remove a single memory by its ID. Use when information is wrong, outdated, or the user asks you to forget something specific. The memory is also removed from the search index and knowledge graph.',
+    `Permanently remove a memory by ID. Also removes it from vector index and knowledge graph.
+
+When to use: Info is completely wrong, user explicitly says "forget this" or "remove that".
+When NOT to use: Info just needs correction (use update_memory instead).`,
     {
-      memory_id: z.string().describe('The UUID of the memory to delete.'),
+      memory_id: z.string().describe('UUID of the memory to delete. Search first if you only have the content.'),
     },
     async (args) => {
       await client.delete(`/v1/memories/${args.memory_id}`);
@@ -215,7 +237,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 
   tool(
     'list_entities',
-    'List all distinct users and agents that have memories stored, with a count of how many memories each has. Useful for understanding who is using the memory system and how much data exists per person.',
+    'List all users and agents that have stored memories, with memory count per entity. Use to discover who is in the system before scoping searches.',
     {},
     async () => {
       const res = await client.get<ApiResponse<unknown[]>>('/v1/memories/entities');
@@ -223,31 +245,20 @@ export function registerTools(server: McpServer, client: ApiClient): void {
     },
   );
 
-  tool(
-    'delete_all_memories',
-    'Delete ALL memories for a given user or agent scope. This is a destructive bulk operation — use with caution and only when the user explicitly asks to start fresh or wipe their data. At least one of user_id or agent_id should be provided to scope the deletion.',
-    {
-      user_id: z.string().optional().describe('Delete all memories for this user.'),
-      agent_id: z.string().optional().describe('Delete all memories for this agent.'),
-    },
-    async (args) => {
-      await client.delete('/v1/memories', {
-        user_id: args.user_id as string | undefined,
-        agent_id: args.agent_id as string | undefined,
-      });
-      return textResult({ message: 'All matching memories deleted.' });
-    },
-  );
-
   // ── Knowledge ───────────────────────────────────────────────
 
   tool(
     'get_knowledge',
-    'Retrieve the consolidated knowledge profile for a user. Knowledge is automatically compiled from memories by the processing pipeline — it groups related memories into structured categories (preferences, work, projects, etc.) and maintains versions. Use with merged=true to get a single Markdown text with all categories, ideal for loading full user context at the start of a conversation. Returns nothing if memories have not been consolidated yet — fall back to search_memories in that case.',
+    `Retrieve the user's consolidated knowledge profile — a structured Markdown document compiled automatically from their memories.
+
+When to use: START OF EVERY CONVERSATION. Call with merged=true to load the full user context before responding. This is the most efficient way to understand who the user is and what they care about.
+When NOT to use: Looking for specific info (use search_memories). Knowledge may not exist yet for brand-new users — fall back to search_memories if this returns empty.
+
+Knowledge is compiled from memories through the processing pipeline: individual memories → consolidation → grouped topics → knowledge base. It maintains versions and gets richer as more memories are added.`,
     {
-      user_id: z.string().optional().describe('The user whose knowledge to retrieve. Defaults to "default" if omitted.'),
-      category: z.string().optional().describe('Filter to a specific category, e.g. "preferences", "work", "projects". Returns all categories if omitted.'),
-      merged: z.boolean().optional().describe('When true, merges all categories into a single Markdown text — the most useful format for building conversation context. Default false returns each category separately.'),
+      user_id: z.string().optional().describe('User whose knowledge to load. Defaults to "default".'),
+      category: z.string().optional().describe('Filter to one category (e.g. "preferences", "work", "projects"). Omit for all.'),
+      merged: z.boolean().optional().describe('true = single Markdown document with all categories (RECOMMENDED for context loading). false = categories returned separately.'),
     },
     async (args) => {
       try {
@@ -270,7 +281,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 
   tool(
     'list_pools',
-    'List all shared memory pools in the current workspace. Pools are collaborative memory spaces where multiple users or agents can contribute and read memories. Shows each pool with its name, access level, member count, and memory count.',
+    'List all shared memory pools in the workspace. Pools are collaborative spaces where multiple users/agents contribute and read memories. Returns name, access level, member count, and memory count per pool.',
     {},
     async () => {
       const res = await client.get<ApiResponse<unknown[]>>('/v1/memory-pools');
@@ -280,14 +291,17 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 
   tool(
     'add_memory_to_pool',
-    'Store a memory inside a shared pool, making it visible to all pool members. Use this instead of add_memory when the information is relevant to a team or group context rather than just one user. The memory is processed through the same pipeline as regular memories.',
+    `Store a memory in a shared pool, visible to all pool members. Use instead of add_memory when info is relevant to a team/group, not just one user.
+
+When to use: Team decisions, shared project facts, group preferences. Example: "The team agreed to use PostgreSQL for all new services."
+When NOT to use: Personal preferences or individual context (use add_memory).`,
     {
-      pool_id: z.string().describe('UUID of the target pool.'),
-      content: z.string().describe('The memory content — a clear, self-contained statement.'),
-      user_id: z.string().optional().describe('The user contributing this memory.'),
-      agent_id: z.string().optional().describe('The agent contributing this memory.'),
-      priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional().describe('Priority level for this memory.'),
-      metadata: z.string().optional().describe('JSON string with additional structured data.'),
+      pool_id: z.string().describe('UUID of the target pool (get from list_pools).'),
+      content: z.string().describe('Clear, self-contained statement. Same language as the user.'),
+      user_id: z.string().optional().describe('User contributing this memory.'),
+      agent_id: z.string().optional().describe('Agent contributing this memory.'),
+      priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional().describe('Priority level.'),
+      metadata: z.string().optional().describe('JSON string with structured data.'),
     },
     async (args) => {
       let metadata: Record<string, unknown> | undefined;
@@ -320,12 +334,12 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 
   tool(
     'search_pool',
-    'Search memories within a specific shared pool. Works like search_memories but scoped to one pool. Use this when you need context from a team or project pool rather than searching across all personal memories.',
+    'Search within a specific shared pool. Like search_memories but scoped to one pool. Use for team/project context.',
     {
-      pool_id: z.string().describe('UUID of the pool to search within.'),
-      query: z.string().describe('Natural language search query.'),
-      limit: z.number().optional().describe('Maximum results (default 10).'),
-      mode: z.enum(['hybrid', 'semantic', 'keyword']).optional().describe('Search strategy: hybrid (default), semantic, or keyword.'),
+      pool_id: z.string().describe('UUID of the pool to search.'),
+      query: z.string().describe('Natural language query in the same language as pool memories.'),
+      limit: z.number().optional().describe('Max results (default 10).'),
+      mode: z.enum(['hybrid', 'semantic', 'keyword']).optional().describe('Search strategy. Default: hybrid.'),
     },
     async (args) => {
       const res = await client.get<ApiResponse<Record<string, unknown>[]>>('/v1/memories', {
@@ -354,12 +368,15 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 
   tool(
     'graph_search',
-    'Search the knowledge graph for entities (people, organizations, technologies, etc.) using semantic similarity. Entities and their relationships are automatically extracted from memories. Use this to discover who or what is mentioned in the stored memories and how they relate to each other.',
+    `Search the knowledge graph for entities (people, organizations, technologies, projects, etc.) by semantic similarity. Entities and relationships are automatically extracted from memories.
+
+When to use: Discover who/what is mentioned in memories, find entities by concept ("frontend tools", "team members"), or check if an entity exists before traversing.
+When NOT to use: Looking for memory content (use search_memories). Looking for relationship paths (use graph_traverse after finding the entity here).`,
     {
-      query: z.string().describe('What you are looking for — a name, role, technology, or concept. E.g. "frontend developers", "machine learning tools".'),
-      user_id: z.string().optional().describe('Scope to entities from a specific user\'s memories.'),
-      type: z.string().optional().describe('Filter by entity type: PERSON, ORGANIZATION, LOCATION, EVENT, CONCEPT, PRODUCT, TECHNOLOGY, or OTHER.'),
-      limit: z.number().min(1).max(50).optional().describe('Maximum entities to return (default 10).'),
+      query: z.string().describe('Name, role, technology, or concept. E.g. "frontend developers", "NestJS", "João".'),
+      user_id: z.string().optional().describe('Scope to one user\'s entities.'),
+      type: z.string().optional().describe('Filter: PERSON, ORGANIZATION, LOCATION, TECHNOLOGY, PROJECT, ROLE, EVENT, CONCEPT.'),
+      limit: z.number().min(1).max(50).optional().describe('Max entities (default 10).'),
     },
     async (args) => {
       const res = await client.get<ApiResponse<unknown>>('/v1/graph/search', {
@@ -374,13 +391,18 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 
   tool(
     'graph_traverse',
-    'Explore the knowledge graph by walking relationships from a starting entity. Follows connections bidirectionally up to 3 hops deep. Use this when you found an entity via graph_search and want to discover what it connects to — e.g. starting from a person, find their organization, projects, and technologies.',
+    `Walk relationships from a starting entity, bidirectionally, up to 3 hops deep.
+
+When to use: You found an entity via graph_search and want to discover connections. E.g. from a person → their organization, projects, technologies. From a technology → who uses it, what depends on it.
+When NOT to use: You don't have an entity ID yet (use graph_search first). You want a natural language answer (use graph_query).
+
+Typical workflow: graph_search("João") → get entity ID → graph_traverse(from=id) → see all connections.`,
     {
-      from: z.string().uuid().describe('UUID of the starting entity (get this from graph_search results).'),
-      depth: z.number().min(1).max(3).optional().describe('How many relationship hops to follow (default 2, max 3). Higher depth finds more distant connections but returns more data.'),
-      relationship_type: z.string().optional().describe('Only follow this type of relationship, e.g. "WORKS_AT", "USES", "KNOWS". Omit to follow all types.'),
-      entity_type: z.string().optional().describe('Only include target entities of this type: PERSON, ORGANIZATION, TECHNOLOGY, etc.'),
-      limit: z.number().min(1).max(100).optional().describe('Maximum connected nodes to return (default 50).'),
+      from: z.string().uuid().describe('UUID of starting entity (from graph_search results).'),
+      depth: z.number().min(1).max(3).optional().describe('Hops to follow (default 2, max 3). Higher = more connections but more data.'),
+      relationship_type: z.string().optional().describe('Only this relationship type: WORKS_AT, USES, KNOWS, MANAGES, DEPENDS_ON, etc. Omit for all.'),
+      entity_type: z.string().optional().describe('Only target entities of this type: PERSON, ORGANIZATION, TECHNOLOGY, PROJECT, etc.'),
+      limit: z.number().min(1).max(100).optional().describe('Max connected nodes (default 50).'),
     },
     async (args) => {
       const res = await client.get<ApiResponse<unknown>>('/v1/graph/traverse', {
@@ -396,11 +418,14 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 
   tool(
     'graph_query',
-    'Ask a natural language question about the knowledge graph and get a structured answer. The system extracts entities from your question, searches the graph, and generates an answer based on discovered relationships. This is the most powerful graph tool but consumes LLM tokens. Use for complex relationship questions like "Who on the team has experience with Kubernetes?" or "What technologies is Project Alpha built with?"',
+    `Ask a natural language question about the knowledge graph and get an AI-generated answer. Most powerful graph tool — uses LLM to interpret relationships and compose an answer.
+
+When to use: Complex relationship questions. Examples: "Who on the team knows Kubernetes?", "What technologies does Project Alpha use?", "How are João and TechCorp connected?"
+When NOT to use: Simple entity lookup (use graph_search — cheaper). Simple memory retrieval (use search_memories — faster). This tool consumes LLM tokens for answer generation.`,
     {
-      query: z.string().describe('A natural language question about entities and relationships in the knowledge base.'),
-      user_id: z.string().optional().describe('Scope the graph to a specific user\'s data.'),
-      limit: z.number().min(1).max(20).optional().describe('Maximum entities to consider when answering (default 10).'),
+      query: z.string().describe('Natural language question about entities and relationships. Be specific.'),
+      user_id: z.string().optional().describe('Scope to one user\'s graph data.'),
+      limit: z.number().min(1).max(20).optional().describe('Max entities to consider (default 10). Higher = more complete but slower.'),
     },
     async (args) => {
       const body: Record<string, unknown> = {
