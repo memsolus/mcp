@@ -39,7 +39,7 @@ When NOT to use: Temporary info, greetings, acknowledgments, or things that only
 
 The memory enters an async pipeline: extraction → embedding → consolidation → knowledge compilation. It becomes searchable within seconds.`,
     {
-      content: z.string().describe('A clear, self-contained statement. Write as a complete sentence, e.g. "Prefers TypeScript over JavaScript for backend" or "O projeto usa NestJS 11 com Fastify". Use the SAME LANGUAGE the user spoke in.'),
+      memory: z.string().describe('A clear, self-contained statement. Write as a complete sentence, e.g. "Prefers TypeScript over JavaScript for backend" or "O projeto usa NestJS 11 com Fastify". Use the SAME LANGUAGE the user spoke in.'),
       user_id: z.string().optional().describe('End-user ID to scope this memory. Without it, memory is global to the workspace.'),
       agent_id: z.string().optional().describe('Agent ID storing this memory. For multi-agent setups.'),
       session_id: z.string().optional().describe('Current session ID. Groups memories from the same conversation.'),
@@ -58,7 +58,7 @@ The memory enters an async pipeline: extraction → embedding → consolidation 
       }
 
       const body: Record<string, unknown> = {
-        content: args.content,
+        memory: args.memory,
         user_id: args.user_id,
         agent_id: args.agent_id,
         session_id: args.session_id,
@@ -191,18 +191,18 @@ When NOT to use: Looking for specific info (use search_memories) or loading user
 
   tool(
     'update_memory',
-    `Replace the content of an existing memory. Triggers re-processing (new embedding, re-categorization, re-consolidation).
+    `Replace an existing memory with new text. Triggers re-processing (new embedding, re-categorization, re-consolidation).
 
 When to use: User corrects a fact, a preference changed, or info is outdated. PREFER this over delete+add when fixing existing info.
 When NOT to use: The info is completely wrong and should just be removed (use delete_memory).`,
     {
       memory_id: z.string().describe('UUID of the memory to update.'),
-      content: z.string().describe('New content that fully replaces the existing text. Write as a complete, self-contained statement.'),
+      memory: z.string().describe('New memory text that fully replaces the existing one. Write as a complete, self-contained statement.'),
       priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional().describe('Optionally change priority.'),
     },
     async (args) => {
       const body: Record<string, unknown> = {
-        content: args.content,
+        memory: args.memory,
       };
       if (args.priority) {
         body.priority = args.priority;
@@ -224,7 +224,7 @@ When NOT to use: The info is completely wrong and should just be removed (use de
 When to use: Info is completely wrong, user explicitly says "forget this" or "remove that".
 When NOT to use: Info just needs correction (use update_memory instead).`,
     {
-      memory_id: z.string().describe('UUID of the memory to delete. Search first if you only have the content.'),
+      memory_id: z.string().describe('UUID of the memory to delete. Search first if you only have the memory text.'),
     },
     async (args) => {
       await client.delete(`/v1/memories/${args.memory_id}`);
@@ -294,7 +294,7 @@ When to use: Team decisions, shared project facts, group preferences. Example: "
 When NOT to use: Personal preferences or individual context (use add_memory).`,
     {
       pool_id: z.string().describe('UUID of the target pool (get from list_pools).'),
-      content: z.string().describe('Clear, self-contained statement. Same language as the user.'),
+      memory: z.string().describe('Clear, self-contained statement. Same language as the user.'),
       user_id: z.string().optional().describe('User contributing this memory.'),
       agent_id: z.string().optional().describe('Agent contributing this memory.'),
       priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional().describe('Priority level.'),
@@ -311,7 +311,7 @@ When NOT to use: Personal preferences or individual context (use add_memory).`,
       }
 
       const body: Record<string, unknown> = {
-        content: args.content,
+        memory: args.memory,
         user_id: args.user_id,
         agent_id: args.agent_id,
         priority: args.priority,

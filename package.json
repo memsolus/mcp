@@ -1,6 +1,6 @@
 {
   "name": "@memsolus/mcp",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Persistent memory for AI agents. Store, search, and reason over long-term context via Model Context Protocol (MCP).",
   "type": "module",
   "main": "dist/index.js",
