@@ -37,7 +37,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 When to use: User states a preference ("I prefer dark mode"), shares a fact ("Our API runs on port 3000"), makes a decision ("We chose PostgreSQL"), or says "remember this".
 When NOT to use: Temporary info, greetings, acknowledgments, or things that only matter for the current conversation.
 
-The memory enters an async pipeline: extraction → embedding → consolidation → knowledge compilation. It becomes searchable within seconds (status: PENDING → READY).`,
+The memory enters an async pipeline: extraction → embedding → consolidation → knowledge compilation. It becomes searchable within seconds.`,
     {
       content: z.string().describe('A clear, self-contained statement. Write as a complete sentence, e.g. "Prefers TypeScript over JavaScript for backend" or "O projeto usa NestJS 11 com Fastify". Use the SAME LANGUAGE the user spoke in.'),
       user_id: z.string().optional().describe('End-user ID to scope this memory. Without it, memory is global to the workspace.'),
@@ -70,9 +70,8 @@ The memory enters an async pipeline: extraction → embedding → consolidation 
       const res = await client.post<ApiResponse<Record<string, unknown>>>('/v1/memories', body);
       return textResult({
         id: res.data.id,
-        status: res.data.status,
         priority: res.data.priority,
-        message: 'Memory stored. It will be processed asynchronously — embedding generation, categorization, and knowledge consolidation happen in the background.',
+        message: 'Memory accepted for processing. Embedding generation, categorization, and knowledge consolidation happen in the background.',
       });
     },
   );
@@ -114,7 +113,7 @@ Search modes:
       return textResult({
         memories: res.data.map((m) => ({
           id: m.id,
-          memory: m.content,
+          memory: m.memory,
           user_id: m.user_id,
           agent_id: m.agent_id,
           priority: m.priority,
@@ -152,7 +151,7 @@ When NOT to use: Looking for specific info (use search_memories) or loading user
       return textResult({
         memories: res.data.map((m) => ({
           id: m.id,
-          memory: m.content,
+          memory: m.memory,
           user_id: m.user_id,
           agent_id: m.agent_id,
           priority: m.priority,
@@ -169,7 +168,7 @@ When NOT to use: Looking for specific info (use search_memories) or loading user
 
   tool(
     'get_memory',
-    'Retrieve a single memory by ID. Use when you have an ID from search results and need full details (status, timestamps, metadata).',
+    'Retrieve a single memory by ID. Use when you have an ID from search results and need full details (timestamps, metadata, categories).',
     {
       memory_id: z.string().describe('UUID of the memory.'),
     },
@@ -178,13 +177,12 @@ When NOT to use: Looking for specific info (use search_memories) or loading user
       const m = res.data;
       return textResult({
         id: m.id,
-        memory: m.content,
+        memory: m.memory,
         user_id: m.user_id,
         agent_id: m.agent_id,
         priority: m.priority,
         metadata: m.metadata,
         categories: m.categories,
-        status: m.status,
         created_at: m.created_at,
         updated_at: m.updated_at,
       });
@@ -213,7 +211,6 @@ When NOT to use: The info is completely wrong and should just be removed (use de
       const res = await client.put<ApiResponse<Record<string, unknown>>>(`/v1/memories/${args.memory_id}`, body);
       return textResult({
         id: res.data.id,
-        status: res.data.status,
         priority: res.data.priority,
         message: 'Memory updated. Re-processing will run asynchronously.',
       });
@@ -326,8 +323,7 @@ When NOT to use: Personal preferences or individual context (use add_memory).`,
       return textResult({
         id: res.data.id,
         pool_id: args.pool_id,
-        status: res.data.status,
-        message: 'Memory added to pool. Visible to all pool members after processing.',
+        message: 'Memory accepted for processing. Visible to all pool members after completion.',
       });
     },
   );
@@ -352,7 +348,7 @@ When NOT to use: Personal preferences or individual context (use add_memory).`,
       return textResult({
         memories: res.data.map((m) => ({
           id: m.id,
-          memory: m.content,
+          memory: m.memory,
           user_id: m.user_id,
           agent_id: m.agent_id,
           priority: m.priority,
