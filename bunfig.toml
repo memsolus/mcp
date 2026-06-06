@@ -1,0 +1,6 @@
+# Antes de publicar no npm, trocar a dependência em package.json de:
+#   "@memsolus/sdk": "file:../sdk-typescript"
+# para:
+#   "@memsolus/sdk": "^<versao>"
+# O bun 1.3.6 não suporta override file: via [install.overrides] quando
+# o scope @memsolus tem registry configurado no bunfig global.

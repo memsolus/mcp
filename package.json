@@ -1,49 +1,42 @@
 {
   "name": "@memsolus/mcp",
-  "version": "0.3.0",
-  "description": "Persistent memory for AI agents. Store, search, and reason over long-term context via Model Context Protocol (MCP).",
-  "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "bin": {
-    "memsolus-mcp": "dist/cli.js"
-  },
-  "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "dev": "tsc --watch",
-    "start": "node dist/cli.js",
-    "start:http": "node dist/http.js"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1",
-    "zod": "^3.24.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.9.0",
-    "@types/node": "^22.0.0"
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
+  "version": "1.0.1",
+  "description": "MCP Server for Memsolus — persistent memory tools for AI agents",
+  "homepage": "https://github.com/memsolus/mcp#readme",
+  "bugs": "https://github.com/memsolus/mcp/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/memsolus/mcp.git"
+    "url": "https://github.com/memsolus/mcp"
   },
-  "homepage": "https://memsolus.com",
-  "bugs": {
-    "url": "https://github.com/memsolus/mcp/issues"
+  "type": "module",
+  "bin": {
+    "memsolus-mcp": "./dist/cli.js"
   },
-  "author": "Memsolus <contact@memsolus.com> (https://memsolus.com)",
-  "keywords": [
-    "mcp",
-    "memory",
-    "ai",
-    "rag",
-    "semantic-search",
-    "memsolus"
-  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+    "start": "node dist/cli.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@memsolus/sdk": "^1.0.1",
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "tsc-alias": "^1.8.17",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": ["memsolus", "mcp", "memory", "ai", "knowledge-graph"],
   "license": "MIT",
   "engines": {
     "node": ">=18"

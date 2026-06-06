@@ -1,70 +1,283 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ApiClient } from './api-client.js';
-import type { ApiClientConfig } from './api-client.js';
-import { registerTools } from './tools.js';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
+import { MemsolusClient } from '@memsolus/sdk';
+import type { McpConfig } from '_config';
+import type { ToolDefinition } from '_tools/index';
+import { allTools } from '_tools/index';
+import type { ResourceDefinition } from '_resources/index';
+import { allResources } from '_resources/index';
+import type { PromptDefinition } from '_prompts/index';
+import { allPrompts } from '_prompts/index';
+import { filterByEntitlements } from './entitlements.js';
+import type { McpEntitlements } from './entitlements.js';
 
-export interface MemsolusMcpConfig extends ApiClientConfig {
-  serverName?: string;
-  serverVersion?: string;
-  instructions?: string;
+export interface ServerInstance {
+  readonly server: Server;
+  readonly transport: StdioServerTransport;
 }
 
-const DEFAULT_INSTRUCTIONS = `Memsolus is a persistent memory system with vector search. Use it to store and retrieve information across conversations.
+// Permissivo por padrão — a API rejeita chamadas indevidas com 403
+const FALLBACK_ENTITLEMENTS: McpEntitlements = {
+  hasMcpAccess: true,
+  hasKnowledgeGraph: true,
+};
 
-## When to use
+export async function createServer(config: McpConfig): Promise<ServerInstance> {
+  const client = buildClient(config);
 
-- **Start of conversation**: Call get_knowledge (merged=true) to load the user's full context profile before responding.
-- **User shares a fact, preference, or decision**: Call add_memory to store it. Write clear, standalone statements — not conversation fragments.
-- **You need past context**: Call search_memories with a specific natural language query. Prefer "hybrid" mode for general queries, "keyword" for exact names/IDs.
-- **User says "remember this" or "don't forget"**: Call add_memory with priority HIGH.
-- **User says "forget this" or asks to remove info**: Call delete_memory with the specific ID (search first if needed).
-- **User corrects something**: Call update_memory on the existing memory rather than creating a new one.
+  const entitlements = await fetchEntitlements(client);
+  const filtered = filterByEntitlements(allTools, allResources, allPrompts, entitlements);
 
-## When NOT to use
+  if (!entitlements.hasMcpAccess) {
+    process.stderr.write(
+      '[memsolus-mcp] Error: Your plan does not include MCP access. Upgrade at app.memsolus.com/settings/billing\n',
+    );
+  }
 
-- Do NOT store temporary or session-specific info (e.g., "user asked about X" — that's conversation context, not a memory).
-- Do NOT store greetings, filler, or acknowledgments.
-- Do NOT call search_memories for every message — only when you actually need stored context.
+  if (filtered.disabledFeatures.length > 0) {
+    process.stderr.write(
+      `[memsolus-mcp] Disabled features: ${filtered.disabledFeatures.join(', ')}\n`,
+    );
+  }
 
-## Memory quality guidelines
+  const server = buildServer();
+  registerToolHandlers(server, client, filtered.tools);
+  registerResourceHandlers(server, client, filtered.resources);
+  registerPromptHandlers(server, client, filtered.prompts);
 
-- Write each memory as a complete, self-contained statement that makes sense without other memories.
-- Use the same language as the user. If they speak Portuguese, store in Portuguese.
-- For important rules or preferences, use priority HIGH.
-- For supplementary context, use priority LOW.
+  const transport = new StdioServerTransport();
 
-## Tool selection guide
+  return { server, transport };
+}
 
-| Need | Tool |
-|------|------|
-| Load full user profile at conversation start | get_knowledge (merged=true) |
-| Find specific info by topic | search_memories |
-| Store new information | add_memory |
-| Correct/update existing info | update_memory |
-| Remove wrong/outdated info | delete_memory |
-| Browse all memories chronologically | get_memories |
-| Discover who/what is in the knowledge graph | graph_search |
-| Explore relationships from an entity | graph_traverse |
-| Ask complex relationship questions | graph_query |
-| Team/shared context | search_pool, add_memory_to_pool |`;
-
-export function createServer(config: MemsolusMcpConfig): McpServer {
-  const client = new ApiClient({
-    baseUrl: config.baseUrl,
+function buildClient(config: McpConfig): MemsolusClient {
+  const clientConfig: { apiKey: string; baseUrl?: string; workspaceId?: string } = {
     apiKey: config.apiKey,
-  });
+    baseUrl: config.apiUrl,
+  };
 
-  const server = new McpServer(
+  if (config.workspaceId !== undefined) {
+    clientConfig.workspaceId = config.workspaceId;
+  }
+
+  return new MemsolusClient(clientConfig);
+}
+
+async function fetchEntitlements(client: MemsolusClient): Promise<McpEntitlements> {
+  try {
+    const profile = await client.accessProfile.get();
+    return {
+      hasMcpAccess: profile.plan.entitlements.hasMcpAccess,
+      hasKnowledgeGraph: profile.plan.entitlements.hasKnowledgeGraph,
+    };
+  } catch {
+    // Fallback gracioso: registra todos os tools se a API estiver indisponível
+    process.stderr.write(
+      '[memsolus-mcp] Warning: Could not fetch plan entitlements. Registering all tools.\n',
+    );
+    return FALLBACK_ENTITLEMENTS;
+  }
+}
+
+function buildServer(): Server {
+  return new Server(
+    { name: 'memsolus', version: '1.0.0' },
     {
-      name: config.serverName || 'memsolus',
-      version: config.serverVersion || '0.1.0',
-    },
-    {
-      instructions: config.instructions || DEFAULT_INSTRUCTIONS,
+      capabilities: {
+        tools: {},
+        resources: {},
+        prompts: {},
+      },
     },
   );
+}
 
-  registerTools(server, client);
+function registerToolHandlers(
+  server: Server,
+  client: MemsolusClient,
+  tools: readonly ToolDefinition[],
+): void {
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    return {
+      tools: tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      })),
+    };
+  });
 
-  return server;
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const tool = tools.find((t) => t.name === request.params.name);
+    if (!tool) {
+      return {
+        content: [{ type: 'text' as const, text: `Unknown tool: ${request.params.name}` }],
+        isError: true,
+      };
+    }
+
+    const args = (request.params.arguments ?? {}) as Record<string, unknown>;
+
+    try {
+      const result = await tool.handler(args, client);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+      };
+    } catch (error) {
+      return buildToolErrorResult(error);
+    }
+  });
+}
+
+function buildToolErrorResult(error: unknown): { content: [{ type: 'text'; text: string }]; isError: true } {
+  let message = 'An unexpected error occurred';
+
+  if (error instanceof Error) {
+    message = error.message;
+  }
+
+  return {
+    content: [{ type: 'text' as const, text: message }],
+    isError: true,
+  };
+}
+
+function registerResourceHandlers(
+  server: Server,
+  client: MemsolusClient,
+  resources: readonly ResourceDefinition[],
+): void {
+  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    return {
+      resources: resources.map((resource) => ({
+        uri: resource.uri,
+        name: resource.name,
+        description: resource.description,
+        mimeType: resource.mimeType,
+      })),
+    };
+  });
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    const requestUri = request.params.uri;
+    const resource = findResourceByUri(requestUri, resources);
+
+    if (!resource) {
+      throw new Error(`Resource not found: ${requestUri}`);
+    }
+
+    const params = extractUriParams(resource.uri, requestUri);
+    const content = await resource.handler(client, params);
+
+    return {
+      contents: [
+        {
+          uri: requestUri,
+          mimeType: resource.mimeType,
+          text: content,
+        },
+      ],
+    };
+  });
+}
+
+function registerPromptHandlers(
+  server: Server,
+  client: MemsolusClient,
+  prompts: readonly PromptDefinition[],
+): void {
+  server.setRequestHandler(ListPromptsRequestSchema, async () => {
+    return {
+      prompts: prompts.map((prompt) => ({
+        name: prompt.name,
+        description: prompt.description,
+        arguments: prompt.arguments.map((arg) => ({
+          name: arg.name,
+          description: arg.description,
+          required: arg.required,
+        })),
+      })),
+    };
+  });
+
+  server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    const prompt = prompts.find((p) => p.name === request.params.name);
+    if (!prompt) {
+      throw new Error(`Unknown prompt: ${request.params.name}`);
+    }
+
+    const args = (request.params.arguments ?? {}) as Record<string, string>;
+    const text = await prompt.handler(args, client);
+
+    return {
+      description: prompt.description,
+      messages: [
+        {
+          role: 'user' as const,
+          content: { type: 'text' as const, text },
+        },
+      ],
+    };
+  });
+}
+
+function findResourceByUri(
+  requestUri: string,
+  resources: readonly ResourceDefinition[],
+): ResourceDefinition | undefined {
+  for (const resource of resources) {
+    if (isUriMatch(resource.uri, requestUri)) {
+      return resource;
+    }
+  }
+  return undefined;
+}
+
+function isUriMatch(template: string, uri: string): boolean {
+  const pattern = template.replace(/\{[^}]+\}/g, '[^/]+');
+  const regex = new RegExp(`^${pattern}$`);
+  return regex.test(uri);
+}
+
+function extractUriParams(template: string, uri: string): Record<string, string> {
+  const paramNames: string[] = [];
+  const paramPattern = /\{([^}]+)\}/g;
+  let match = paramPattern.exec(template);
+
+  while (match !== null) {
+    if (match[1] !== undefined) {
+      paramNames.push(match[1]);
+    }
+    match = paramPattern.exec(template);
+  }
+
+  if (paramNames.length === 0) {
+    return {};
+  }
+
+  const regexSource = template.replace(/\{[^}]+\}/g, '([^/]+)');
+  const regex = new RegExp(`^${regexSource}$`);
+  const valueMatch = regex.exec(uri);
+
+  if (!valueMatch) {
+    return {};
+  }
+
+  const params: Record<string, string> = {};
+  paramNames.forEach((name, index) => {
+    const value = valueMatch[index + 1];
+    if (value !== undefined) {
+      params[name] = value;
+    }
+  });
+
+  return params;
 }
