@@ -1,18 +1,14 @@
-#!/usr/bin/env node
-
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { loadConfig } from '_config';
 import { createServer } from './server.js';
-import { loadConfig } from './config.js';
 
-async function main() {
+async function main(): Promise<void> {
   const config = loadConfig();
-  const server = createServer(config);
-  const transport = new StdioServerTransport();
-
+  const { server, transport } = await createServer(config);
   await server.connect(transport);
 }
 
-main().catch((error) => {
-  console.error('Fatal:', error);
+main().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : 'Unknown error';
+  process.stderr.write(`[memsolus-mcp] Fatal: ${message}\n`);
   process.exit(1);
 });

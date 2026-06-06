@@ -1,18 +1,25 @@
-import type { MemsolusMcpConfig } from './server.js';
+export interface McpConfig {
+  readonly apiKey: string;
+  readonly apiUrl: string;
+  readonly workspaceId?: string;
+}
 
-export function loadConfig(): MemsolusMcpConfig {
-  const apiKey = process.env.MEMSOLUS_API_KEY;
+export function loadConfig(): McpConfig {
+  const apiKey = process.env['MEMSOLUS_API_KEY'];
+
   if (!apiKey) {
-    console.error('Error: MEMSOLUS_API_KEY environment variable is required.');
-    console.error('');
-    console.error('Get your API key at https://app.memsolus.com/api-keys');
-    process.exit(1);
+    throw new Error('MEMSOLUS_API_KEY environment variable is required');
   }
 
-  const baseUrl = process.env.MEMSOLUS_API_URL || 'https://api.memsolus.com';
-
-  return {
-    baseUrl,
+  const workspaceId = process.env['MEMSOLUS_WORKSPACE_ID'];
+  const baseConfig = {
     apiKey,
+    apiUrl: process.env['MEMSOLUS_API_URL'] ?? 'https://api.memsolus.com',
   };
+
+  if (workspaceId !== undefined) {
+    return { ...baseConfig, workspaceId };
+  }
+
+  return baseConfig;
 }
